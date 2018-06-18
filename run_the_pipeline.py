@@ -14,19 +14,22 @@ parser = argparse.ArgumentParser(description="THE CLASP")
 parser.add_argument('snapshot', type=str)
 
 snap = parser.parse_args().snapshot
-# snap = '/ufrc/narayanan/kimockb/snapshots/snapshot_135.hdf5'
-# snap = '/ufrc/narayanan/kimockb/lycrt-example/L43_ref10_HL00230_ref12_2/snapshot_067.hdf5'
+
 ds = yt.load(snap)
 data = ds.all_data()
 
+"""
+Use CAESAR to extract the high-resolution halo 
+"""
 
+# Cache the caesar file next to the original- should probably put them local
 caesarname = os.path.join(os.path.dirname(snap), 'caesar_'+os.path.basename(snap))
 try:
     obj = caesar.load(caesarname)
 except IOError:
     obj = caesar.CAESAR(ds)
     obj.member_search()#unbind_halos=True, unbind_galaxies=False)
-    obj.save(caesarname)
+    #obj.save(caesarname)
 
 # Grab the large but uncontaminated halo
 halo = obj.halos[0]
@@ -35,10 +38,6 @@ halo = obj.halos[0]
 virial_radius = halo.radii['virial']
 gas_position = data[('PartType0', 'Coordinates')]
 glist = ((gas_position - halo.pos)**2).sum(axis=1) < virial_radius**2
-
-#print("Position: {}".format(halo.pos))
-#print("Virial Radius: {}".format(halo.radii['virial']))
-#exit()
 
 gas_position = data[('PartType0', 'Coordinates')][glist]
 mass = data[('PartType0', 'Masses')][glist]
@@ -49,7 +48,9 @@ electron_fraction = data[('PartType0', 'ElectronAbundance')][glist]
 gas_metallicity = data[('PartType0', 'Metallicity_00')][glist]
 smoothing_length = data[('PartType0', 'SmoothingLength')][glist]
 
-
+"""
+Prepare inputs for xiangcheng's BPASS wrapper
+"""
 # Grab the required star data and run it through bpass
 star_position = data[('PartType4', 'Coordinates')]
 slist = ((star_position - halo.pos)**2).sum(axis=1) < virial_radius**2
@@ -68,7 +69,9 @@ stellar_ages = (simtime - stellar_formation_age).in_units('Gyr')
 
 log_luminosity = bpass.compute_stellar_luminosity(stellar_ages, star_metallicity)
 
-# Send the star and gas data to lycrt via temp files
+"""
+Send the star and gas data to lycrt via temp files
+"""
 with tempfile.NamedTemporaryFile(mode='w') as starfile, tempfile.NamedTemporaryFile(mode='w') as paramfile, tempfile.NamedTemporaryFile(mode='w') as octreefile:
 
     octree.build_octree_from_particle(
@@ -175,17 +178,6 @@ n_phi           1""".format(octreefile.name, starfile.name))
             dtype=np.float64))  # Cell velocities (cm/s)
     f['v'].attrs['units'] = b'cm/s'
     f.close()
-    # hl = sp.loadhalo(id=id)
-    # p4 = sp.loadpart(4)
-    # r4 = np.sqrt((p4.p[:,0]-hl.xc)**2+(p4.p[:,1]-hl.yc)**2+(p4.p[:,2]-hl.zc)**2)
-    # p4.p[:,0] -= hl.xc; p4.p[:,1] -= hl.yc; p4.p[:,2] -= hl.zc # shift coordinates
-    # ok = (r4<fvir*hl.rvir)
-    # f.attrs["Redshift"] = sp.redshift
-    # f.create_dataset("star_vel", data=p4.v[ok]) # in km/s
-    # f.create_dataset("star_pos", data=p4.p[ok])
-    # f.create_dataset("star_m", data=p4.m[ok]) # in 10^10 Msun
-    # f.create_dataset("star_age", data=p4.age[ok]) # in Gyr
-    # f.create_dataset("star_z", data=p4.z[ok]) # in mass fraction
 
 # Now we can finally kick off COLT
 
