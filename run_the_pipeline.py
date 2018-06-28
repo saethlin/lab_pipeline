@@ -11,9 +11,15 @@ import bpass
 import lycrt
 
 parser = argparse.ArgumentParser(description="THE CLASP")
-parser.add_argument('snapshot', type=str)
+parser.add_argument('snapshot')
+parser.add_argument('--caesar', help="Path to the snapshot's CAESAR file")
+parser.add_argument('--outdir', help="Directory to place output files")
 
-snap = parser.parse_args().snapshot
+args = parser.parse_args()
+
+snap = args.snapshot
+caesar_path = args.caesar or os.path.join(os.path.dirname(snap), f'caesar_{os.path.basename(snap)}')
+output_dir = args.outdir or '.'
 
 ds = yt.load(snap)
 data = ds.all_data()
@@ -23,22 +29,29 @@ Use CAESAR to extract the high-resolution halo
 """
 
 # Cache the caesar file next to the original- should probably put them local
-caesarname = os.path.join(os.path.dirname(snap), 'caesar_'+os.path.basename(snap))
 try:
-    obj = caesar.load(caesarname)
-except IOError:
+    obj = caesar.load(caesar_path)
+except:
     obj = caesar.CAESAR(ds)
-    obj.member_search()#unbind_halos=True, unbind_galaxies=False)
-    #obj.save(caesarname)
+    obj.member_search(unbind_halos=True, unbind_galaxies=True)
+    try:
+        obj.save(caesar_path)
+    except Exception as e:
+        print("Could not save CAESAR file, {}".format(e))
 
-# Grab the large but uncontaminated halo
-halo = obj.halos[0]
 
-# Select based on the virial radius of the selected halo
-virial_radius = halo.radii['virial']
+SIZE = ds.quan(250.0, 'kpccm')
+
+# Select based on the virial radius of the central galaxy
+galaxy = obj.halos[0].galaxies[0]
+
 gas_position = data[('PartType0', 'Coordinates')]
-glist = ((gas_position - halo.pos)**2).sum(axis=1) < virial_radius**2
+star_position = data[('PartType4', 'Coordinates')]
 
+glist = ((gas_position - galaxy.pos)**2).sum(axis=1) < (2 * SIZE)**2
+slist = ((star_position - galaxy.pos)**2).sum(axis=1) < (2 * SIZE)**2
+
+# Filter the gas particles
 gas_position = data[('PartType0', 'Coordinates')][glist]
 mass = data[('PartType0', 'Masses')][glist]
 velocity = data[('PartType0', 'Velocities')][glist]
@@ -48,13 +61,7 @@ electron_fraction = data[('PartType0', 'ElectronAbundance')][glist]
 gas_metallicity = data[('PartType0', 'Metallicity_00')][glist]
 smoothing_length = data[('PartType0', 'SmoothingLength')][glist]
 
-"""
-Prepare inputs for xiangcheng's BPASS wrapper
-"""
-# Grab the required star data and run it through bpass
-star_position = data[('PartType4', 'Coordinates')]
-slist = ((star_position - halo.pos)**2).sum(axis=1) < virial_radius**2
-
+# Filter the star particles
 star_metallicity = data[('PartType4', 'Metallicity_00')][slist]
 star_position = data[('PartType4', 'Coordinates')][slist]
 
@@ -75,7 +82,7 @@ Send the star and gas data to lycrt via temp files
 with tempfile.NamedTemporaryFile(mode='w') as starfile, tempfile.NamedTemporaryFile(mode='w') as paramfile, tempfile.NamedTemporaryFile(mode='w') as octreefile:
 
     octree.build_octree_from_particle(
-        pos=gas_position,
+        pos=gas_position.to('kpccm'),
         vel=velocity,
         m=mass,
         h=smoothing_length,
@@ -83,8 +90,11 @@ with tempfile.NamedTemporaryFile(mode='w') as starfile, tempfile.NamedTemporaryF
         ne=electron_fraction,
         u=internal_energy,
         z=gas_metallicity,
-        cen=halo.pos,
-        fname=octreefile.name.encode('utf-8'))
+        cen=galaxy.pos,
+        fname=octreefile.name.encode('utf-8'),
+        MAX_DISTANCE_FROM0=SIZE,
+        TREE_MAX_NPART=1,
+        TREE_MIN_SIZE=0.01)
 
     starfile.write('{}\n'.format(star_metallicity.size))
     for (pos, lum) in zip(star_position, log_luminosity):
@@ -93,7 +103,7 @@ with tempfile.NamedTemporaryFile(mode='w') as starfile, tempfile.NamedTemporaryF
 
     paramfile.write("""octree_file     {}
 star_file       {}
-n_iters         10
+n_iters         100
 n_photons_star  1e5
 n_photons_uvb   1e5
 J_uvb           1.2082e-22
@@ -110,7 +120,7 @@ n_phi           1""".format(octreefile.name, starfile.name))
     # load ionization data
     # TODO: This is a magic filename that comes from lyrt's internals
     # TODO: It would be great if we could have control of that
-    state = np.loadtxt('state_09.txt')
+    state = np.loadtxt('state_99.txt')
     x_HI_leaf = state[:, 0]
     Jion_leaf = state[:, 1]
     scc = tree.sub_cell_check
@@ -126,9 +136,8 @@ n_phi           1""".format(octreefile.name, starfile.name))
     Msun = 1.988435e33          # Solar mass in g
 
    # write to a hdf5 file
-    f = h5py.File('converted_' + os.path.basename(snap), 'w')
-    f.attrs['redshift'] = 5.0
-    #f.attrs['redshift'] = np.float64(sp.redshift)
+    f = h5py.File(os.path.join(output_dir, f'converted_{os.path.basename(snap)}'), 'w')
+    f.attrs['redshift'] = np.float64(obj.simulation.redshift)
     f.attrs['n_cells'] = np.int32(tree.TOTAL_NUMBER_OF_CELLS)
     f.create_dataset('parent', data=np.array(tree.parent_ID, dtype=np.int32))
     f.create_dataset(
