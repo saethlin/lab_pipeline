@@ -59,7 +59,7 @@ with PdfPages("symposium.pdf") as pdf, matplotlib.style.context(
         "...We have also discovered two extremely bright, large, and diffuse Lyα-emitting “blobs”...",
         va="center",
         ha="left",
-        fontsize=52,
+        fontsize=48,
         wrap=True,
     )
     text = fig.text(
@@ -92,7 +92,7 @@ with PdfPages("symposium.pdf") as pdf, matplotlib.style.context(
         "Ly$\\alpha$ ~ $10^{44}$ erg/s\nR ~ 100 kpc\nz ~ 2-5\n\nStar formation or AGN\nLittle/No radio emission\nOverdense regions",
         va="center",
         ha="left",
-        fontsize=48,
+        fontsize=36,
         wrap=True,
     )
     ax2 = fig.add_axes([0.6, bottom, 0.4, 1.0-bottom-top])
@@ -113,7 +113,7 @@ with PdfPages("symposium.pdf") as pdf, matplotlib.style.context(
         "UV, redshifted to optical for 2 < z < 5\n\nVery fast transition\n\nVery optically thick",
         va="center",
         ha="left",
-        fontsize=48,
+        fontsize=36,
         wrap=True,
     )
     pdf.savefig(fig, dpi=100)
@@ -140,7 +140,7 @@ fgas = {gal.gas_fraction:.3f}
 """,
         va="center",
         ha="left",
-        fontsize=48,
+        fontsize=36,
         wrap=True,
     )
     pdf.savefig(fig, dpi=100)
@@ -167,7 +167,7 @@ fgas = {gal.gas_fraction:.3f}
         # God dammit put the colorbar where I want it
         density_plot.cax.set_position([0.815, 0.09, (0.9-0.09)/25, 0.9-0.09])
         pdf.savefig(density_plot.figure, dpi=100)
-
+    
     # Figure slide
     colt_images = colt_file["LOS/SB"][:4]
     for image in colt_images:
@@ -214,7 +214,7 @@ fgas = {gal.gas_fraction:.3f}
 """,
         va="center",
         ha="left",
-        fontsize=48,
+        fontsize=36,
         wrap=True,
     )
     pdf.savefig(fig, dpi=100)
@@ -289,7 +289,7 @@ fgas = {gal.gas_fraction:.3f}
 """,
         va="center",
         ha="left",
-        fontsize=48,
+        fontsize=36,
         wrap=True,
     )
     pdf.savefig(fig, dpi=100)
@@ -364,7 +364,7 @@ fgas = {gal.gas_fraction:.3f}
 """,
         va="center",
         ha="left",
-        fontsize=48,
+        fontsize=36,
         wrap=True,
     )
     pdf.savefig(fig, dpi=100)
@@ -438,12 +438,11 @@ Special thanks to Xiangcheng Ma and Aaron Smith for their code and expertise
 """,
         va="center",
         ha="left",
-        fontsize=48,
+        fontsize=36,
         wrap=True,
     )
     pdf.savefig(fig, dpi=100)
     text.remove()
     ax.remove()
-
 
 
