@@ -24,10 +24,10 @@ output_dir = args.outdir or '.'
 
 caesar_files = sorted([f.path for f in os.scandir(os.path.dirname(caesar_path)) if 'caesar_00' in f.name])
 
-galaxy_pos = h5py.File(caesar_files[0])['galaxy_data']['pos'][1]
+galaxy_pos = h5py.File(caesar_files[0])['galaxy_data']['pos'][0]
 
 for f in caesar_files:
-    pos = h5py.File(f)['galaxy_data']['pos'][:20]
+    pos = h5py.File(f)['galaxy_data']['pos'][:10]
     distance = np.sum((pos - galaxy_pos)**2, axis=1)
     galaxy_pos = pos[np.argmin(distance)]
     print(galaxy_pos)
@@ -105,7 +105,7 @@ with open(os.path.join(args.outdir, 'starfile'), 'w') as starfile, open(os.path.
 
     paramfile.write("""octree_file     {}
 star_file       {}
-n_iters         10
+n_iters         100
 n_photons_star  1e5
 n_photons_uvb   1e5
 J_uvb           1.2082e-22
@@ -122,7 +122,7 @@ n_phi           1""".format(octreefile.name, starfile.name))
     # load ionization data
     # TODO: This is a magic filename that comes from lyrt's internals
     # TODO: It would be great if we could have control of that
-    state = np.loadtxt('state_09.txt')
+    state = np.loadtxt('state_099.txt')
     x_HI_leaf = state[:, 0]
     Jion_leaf = state[:, 1]
     scc = tree.sub_cell_check

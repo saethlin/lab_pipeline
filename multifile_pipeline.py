@@ -4,6 +4,7 @@ import argparse
 import h5py
 import numpy as np
 import yt
+import caesar
 import octree
 import bpass
 import lycrt
@@ -27,24 +28,37 @@ def load_from_files(files, dataset_path, masks):
 parser = argparse.ArgumentParser(description="THE CLASP")
 parser.add_argument("snapshots", nargs="+")
 parser.add_argument("--caesar", help="Path to the snapshot's CAESAR file")
-parser.add_argument("--outdir", help="Directory to place output files")
+parser.add_argument("--outdir", help="Directory to place output files", default=".")
+parser.add_argument(
+    "--n_iters", help="Number of lycrt iterations", type=int, default=10
+)
+parser.add_argument("--galaxy_index", help="CAESAR galaxy index", type=int, default=0)
+parser.add_argument(
+    "--cube_size", help="Side length of output cube (kpccm)", type=float, default=250
+)
+parser.add_argument(
+    "--max_npart", help="Max number of particles in an octree cell", type=int, default=1
+)
+parser.add_argument(
+    "--min_size",
+    help="Minimum size of an octree cell (kpccm)",
+    type=float,
+    default=0.01,
+)
 
 args = parser.parse_args()
-args.outdir = args.outdir or "."
+os.makedirs(args.outdir, exist_ok=True)
 
 ds = yt.load(args.snapshots[0])
-SIZE = ds.quan(250.0, "kpccm")
+SIZE = ds.quan(args.cube_size, "kpccm")
 
-galaxy_pos = h5py.File(args.caesar)["galaxy_data"]["pos"][0]
-galaxy_pos = yt.YTArray(galaxy_pos, "kpccm", ds.unit_registry)
+# Assume the galaxy of interest is the largest
+obj = caesar.load(args.caesar)
+galaxy_pos = obj.galaxies[args.galaxy_index].pos
 
-# This is disgusting but there's no standard file extension, and people put other crap in their snapdirs
 snap_files = []
 for f in args.snapshots:
-    try:
-        snap_files.append(h5py.File(f))
-    except OSError:
-        pass
+    snap_files.append(h5py.File(f, "r"))
 
 masks = []
 chunks = []
@@ -106,14 +120,9 @@ log_luminosity = bpass.compute_stellar_luminosity(
     stellar_ages, star_metallicity, binary=True
 )
 
-
-# Entries for the stars file
-# TODO: Is this a duplicate of the above call?
-# TODO: What are the required input units here?
 L_UV_star = (1.0e10 * star_masses) * 10 ** bpass.compute_stellar_luminosity(
-    stellar_ages, star_metallicity, BAND_name="UV", binary=True
+    stellar_ages, star_metallicity, BAND_NAME="UV", binary=True
 )
-
 
 """
 Send the star and gas data to lycrt via files
@@ -134,8 +143,8 @@ with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
         cen=galaxy_pos,
         fname=octreefile.name.encode("utf-8"),
         MAX_DISTANCE_FROM0=SIZE,
-        TREE_MAX_NPART=1,
-        TREE_MIN_SIZE=0.01,
+        TREE_MAX_NPART=args.max_npart,
+        TREE_MIN_SIZE=args.min_size,
     )
 
     starfile.write("{}\n".format(star_metallicity.size))
@@ -147,14 +156,14 @@ with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
     paramfile.write(
         """octree_file     {}
 star_file       {}
-n_iters         10
+n_iters         {}
 n_photons_star  1e6
 n_photons_uvb   1e6
 J_uvb           1.2082e-22
 dust_kappa      1
 n_mu            1
 n_phi           1""".format(
-            octreefile.name, starfile.name
+            octreefile.name, starfile.name, args.n_iters
         )
     )
     paramfile.flush()
@@ -167,12 +176,9 @@ n_phi           1""".format(
     # load ionization data
     # TODO: This is a magic filename that comes from lyrt's internals
     # TODO: It would be great if we could have control of that
-    # Grab the last 5 state reports and average them
-    state_files = sorted([f for f in os.listdir(".") if f.startswith("state")])[-5:]
-    state = np.loadtxt(state_files[0])
-    for f in state_files[1:]:
-        state += np.loadtxt(f)
-    state = state / 5.0
+    state_files = sorted([f for f in os.listdir(".") if f.startswith("state")])
+
+    state = np.loadtxt(state_files[-1])
 
     x_HI_leaf = state[:, 0]
     Jion_leaf = state[:, 1]
@@ -188,9 +194,12 @@ n_phi           1""".format(
     Mpc = 1e6 * pc  # 1 Mpc = 10^6 pc
     Msun = 1.988435e33  # Solar mass in g
 
+    base_name = os.path.basename(args.snapshots[0]).split(".")[0]
     # write to a hdf5 file
     f = h5py.File(
-        os.path.join(args.outdir, f"converted_{os.path.basename(args.snapshots[0])}"),
+        os.path.join(
+            args.outdir, f"converted_{os.path.basename(args.snapshots[0])}_{s:02d}"
+        ),
         "w",
     )
     f.attrs["redshift"] = np.float64(ds.current_redshift)
@@ -223,11 +232,11 @@ n_phi           1""".format(
     )  # Cell velocities (cm/s)
     f["v"].attrs["units"] = b"cm/s"
 
-    # Star positions, for UV continuum calculation
     f.attrs["n_stars"] = np.int32(star_positions.size)
 
-    f.create_dataset("r_star", data=star_positions / kpc)
-    f["r_star"].attrs["units"] = b"cm/s"
+    # Star positions and luminosities for UV continuum mode
+    f.create_dataset("r_star", data=star_positions.convert_to_units("cm"))
+    f["r_star"].attrs["units"] = "cm"
 
     f.create_dataset("L_UV", data=L_UV_star)
     f["L_UV"].attrs["units"] = b"erg/s/angstrom"
