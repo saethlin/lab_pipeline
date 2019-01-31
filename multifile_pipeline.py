@@ -43,7 +43,7 @@ parser.add_argument(
     "--min_size",
     help="Minimum size of an octree cell (kpccm)",
     type=float,
-    default=0.01,
+    default=0.001,
 )
 
 args = parser.parse_args()
@@ -93,15 +93,15 @@ gas_metallicity = np.concatenate(
 masks = []
 chunks = []
 for f in snap_files:
-    star_position = f["PartType4/Coordinates"][:]
-    star_position = yt.YTArray(
-        star_position, "code_length", ds.unit_registry
+    star_positions = f["PartType4/Coordinates"][:]
+    star_positions = yt.YTArray(
+        star_positions, "code_length", ds.unit_registry
     ).convert_to_units("kpccm")
-    slist = np.all(np.abs(star_position - galaxy_pos) < SIZE, axis=1)
+    slist = np.all(np.abs(star_positions - galaxy_pos) < SIZE, axis=1)
     masks.append(slist)
-    chunks.append(star_position[slist])
+    chunks.append(star_positions[slist])
 
-star_position = yt.YTArray(np.concatenate(chunks, axis=0), "kpccm", ds.unit_registry)
+star_positions = yt.YTArray(np.concatenate(chunks, axis=0), "kpccm", ds.unit_registry)
 
 star_metallicity = np.concatenate(
     [f["PartType4/Metallicity"][:, 0][m] for (f, m) in zip(snap_files, masks)], axis=0
@@ -121,7 +121,7 @@ log_luminosity = bpass.compute_stellar_luminosity(
 )
 
 L_UV_star = (1.0e10 * star_masses) * 10 ** bpass.compute_stellar_luminosity(
-    stellar_ages, star_metallicity, BAND_NAME="UV", binary=True
+    stellar_ages, star_metallicity, BAND_name="UV", binary=True
 )
 
 """
@@ -148,9 +148,9 @@ with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
     )
 
     starfile.write("{}\n".format(star_metallicity.size))
-    for (pos, lum) in zip(star_position, log_luminosity):
+    for (pos, lum) in zip(star_positions, log_luminosity):
         pos -= galaxy_pos
-        starfile.write("{} {} {} {}\n".format(pos[0], pos[1], pos[2], lum))
+        starfile.write("{} {} {} {}\n".format(pos[0].d, pos[1].d, pos[2].d, lum))
     starfile.flush()
 
     paramfile.write(
@@ -198,7 +198,7 @@ n_phi           1""".format(
     # write to a hdf5 file
     f = h5py.File(
         os.path.join(
-            args.outdir, f"converted_{os.path.basename(args.snapshots[0])}_{s:02d}"
+            args.outdir, f"converted_{os.path.basename(args.snapshots[0])}"
         ),
         "w",
     )
@@ -232,10 +232,10 @@ n_phi           1""".format(
     )  # Cell velocities (cm/s)
     f["v"].attrs["units"] = b"cm/s"
 
-    f.attrs["n_stars"] = np.int32(star_positions.size)
+    f.attrs["n_stars"] = np.int32(star_positions.shape[0])
 
     # Star positions and luminosities for UV continuum mode
-    f.create_dataset("r_star", data=star_positions.convert_to_units("cm"))
+    f.create_dataset("r_star", data=np.array(star_positions.convert_to_units("cm")), dtype=np.float64)
     f["r_star"].attrs["units"] = "cm"
 
     f.create_dataset("L_UV", data=L_UV_star)

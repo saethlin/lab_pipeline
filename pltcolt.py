@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser("COLT Plotter")
 parser.add_argument("file_patterns", nargs="+")
 parser.add_argument("-o", "--output")
 parser.add_argument("--dpi", default=96*8, type=int)
+parser.add_argument("--uv", action='store_true', default=False)
 args = parser.parse_args()
 
 '''
@@ -59,7 +60,10 @@ with PdfPages(args.output) as pdf:
         for output_path in sorted(glob.glob(pattern)):
 
             with h5py.File(output_path, "r") as f:
-                image = f["LOS/SB"][0]
+                if args.uv:
+                    image = f["LOS/SB_UV_LOS"][0]
+                else:
+                    image = f["LOS/SB"][0]
                 redshift = f.attrs["z"]
                 # COLT units are in cm, convert to kpc
                 image_radius = f["LOS"].attrs["SB_radius"] / 3.085677581467192e21
