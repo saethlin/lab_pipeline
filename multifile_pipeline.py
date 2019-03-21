@@ -11,7 +11,7 @@ import lycrt
 import numexpr
 
 
-def load_from_files(files, dataset_path, masks):
+def load_from_files(files, dataset_path, masks, unit):
     chunks = []
     for (f, m) in zip(files, masks):
         if f[dataset_path].ndim == 2:
@@ -22,7 +22,7 @@ def load_from_files(files, dataset_path, masks):
         if chunk.size > 0:
             chunks.append(chunk)
 
-    return np.concatenate(chunks, axis=0)
+    return yt.YTArray(np.concatenate(chunks, axis=0), unit, ds.unit_registry)
 
 
 parser = argparse.ArgumentParser(description="THE CLASP")
@@ -43,7 +43,7 @@ parser.add_argument(
     "--min_size",
     help="Minimum size of an octree cell (kpccm)",
     type=float,
-    default=0.001,
+    default=0.01,
 )
 
 args = parser.parse_args()
@@ -116,12 +116,16 @@ stellar_formation_age = yt_cosmo.t_from_z(formation_z).in_units("Gyr")
 simtime = yt_cosmo.t_from_z(ds.current_redshift).in_units("Gyr")
 stellar_ages = (simtime - stellar_formation_age).in_units("Gyr")
 
-log_luminosity = bpass.compute_stellar_luminosity(
-    stellar_ages, star_metallicity, binary=True
+print(star_masses)
+print(stellar_ages)
+
+# TODO: Still unclear if my usage of this function is correct
+star_ionizing_luminosity = (1e10 * star_masses) * 10**bpass.compute_stellar_luminosity(
+    stellar_ages, star_metallicity, BAND_name='ionizing'
 )
 
 L_UV_star = (1.0e10 * star_masses) * 10 ** bpass.compute_stellar_luminosity(
-    stellar_ages, star_metallicity, BAND_name="UV", binary=True
+    stellar_ages, star_metallicity, BAND_name="UV"
 )
 
 """
@@ -148,7 +152,7 @@ with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
     )
 
     starfile.write("{}\n".format(star_metallicity.size))
-    for (pos, lum) in zip(star_positions, log_luminosity):
+    for (pos, lum) in zip(star_positions, star_ionizing_luminosity):
         pos -= galaxy_pos
         starfile.write("{} {} {} {}\n".format(pos[0].d, pos[1].d, pos[2].d, lum))
     starfile.flush()
@@ -157,8 +161,8 @@ with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
         """octree_file     {}
 star_file       {}
 n_iters         {}
-n_photons_star  1e6
-n_photons_uvb   1e6
+n_photons_star  1e8
+n_photons_uvb   1e8
 J_uvb           1.2082e-22
 dust_kappa      1
 n_mu            1
@@ -166,42 +170,44 @@ n_phi           1""".format(
             octreefile.name, starfile.name, args.n_iters
         )
     )
-    paramfile.flush()
-    # original J_uvb value was 1.2082e-22
-    lycrt.lycrt(paramfile.name)
+    
+# original J_uvb value was 1.2082e-22
+subprocess.check_call(["srun" "--mpi=pmix_v2", "/home/kimockb/octreert/lycrt/src/lycrt", "paramfile"])
 
-    # Convert the lycrt output into an input file for COLT
-    tree = octree.TREE(octreefile.name).load()
+# Convert the lycrt output into an input file for COLT
+tree = octree.TREE(octreefile.name).load()
 
-    # load ionization data
-    # TODO: This is a magic filename that comes from lyrt's internals
-    # TODO: It would be great if we could have control of that
-    state_files = sorted([f for f in os.listdir(".") if f.startswith("state")])
+# load ionization data
+# TODO: This is a magic filename that comes from lyrt's internals
+# TODO: It would be great if we could have control of that
+state_files = sorted([f for f in os.listdir(".") if f.startswith("state")])
+print(state_files[-1])
 
-    state = np.loadtxt(state_files[-1])
+state = np.loadtxt(state_files[-1])
 
-    x_HI_leaf = state[:, 0]
-    Jion_leaf = state[:, 1]
-    scc = tree.sub_cell_check
-    x_HI = np.zeros(len(scc), dtype=np.float64)
-    Jion = np.zeros(len(scc), dtype=np.float64)
-    x_HI[scc == 0] = x_HI_leaf[:]
-    Jion[scc == 0] = Jion_leaf[:]
+x_HI_leaf = state[:, 0]
+Jion_leaf = state[:, 1]
+scc = tree.sub_cell_check
+x_HI = np.zeros(len(scc), dtype=np.float64)
+Jion = np.zeros(len(scc), dtype=np.float64)
+x_HI[scc == 0] = x_HI_leaf[:]
+Jion[scc == 0] = Jion_leaf[:]
 
-    km = 1.0e5  # 1 km = 10^5 cm
-    pc = 3.085677581467192e18  # 1 pc = 3e18 cm
-    kpc = 1e3 * pc  # 1 kpc = 10^3 pc
-    Mpc = 1e6 * pc  # 1 Mpc = 10^6 pc
-    Msun = 1.988435e33  # Solar mass in g
+km = 1.0e5  # 1 km = 10^5 cm
+pc = 3.085677581467192e18  # 1 pc = 3e18 cm
+kpc = 1e3 * pc  # 1 kpc = 10^3 pc
+Mpc = 1e6 * pc  # 1 Mpc = 10^6 pc
+Msun = 1.988435e33  # Solar mass in g
 
-    base_name = os.path.basename(args.snapshots[0]).split(".")[0]
-    # write to a hdf5 file
-    f = h5py.File(
-        os.path.join(
-            args.outdir, f"converted_{os.path.basename(args.snapshots[0])}"
-        ),
-        "w",
-    )
+base_name = os.path.basename(args.snapshots[0]).split(".")[0]
+
+# write to a hdf5 file
+with h5py.File(
+    os.path.join(
+        args.outdir, f"converted_{os.path.basename(args.snapshots[0])}"
+    ),
+    "w",
+) as f:
     f.attrs["redshift"] = np.float64(ds.current_redshift)
     f.attrs["n_cells"] = np.int32(tree.TOTAL_NUMBER_OF_CELLS)
     f.create_dataset("parent", data=np.array(tree.parent_ID, dtype=np.int32))

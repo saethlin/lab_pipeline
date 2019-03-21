@@ -47,6 +47,8 @@ matplotlib.rcParams.update(
     }
 )
 
+#max_clip = 1e-4
+#min_clip = 1e-9
 max_clip = 1e-16
 min_clip = 1e-22
 
@@ -71,6 +73,7 @@ with PdfPages(args.output) as pdf:
 
             #fig = plt.figure(figsize=(12., 10.))
             fig = plt.figure(figsize=(6.0, 5.0))
+            print(image.max())
 
             image = image.clip(min_clip, max_clip)
             #fig.suptitle(f"L_Lya = {lum:.2e}", fontsize=36, color='w')
@@ -89,20 +92,6 @@ with PdfPages(args.output) as pdf:
                 resample=True,
                 interpolation="nearest",
             )
-            '''
-            contour = ax.contour(
-                np.flipud(image),
-                levels=[1.4e-18],
-                colors="w",
-                extent=[
-                    -image_width / 2,
-                    image_width / 2,
-                    -image_width / 2,
-                    image_width / 2,
-                ],
-                linewidths=[0.5],
-            )
-            '''
             cbar = fig.colorbar(plot_image, pad=0)
             cbar.ax.tick_params(axis="both", direction="in", which="both")
 
