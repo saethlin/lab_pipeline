@@ -51,7 +51,8 @@ with h5py.File(f"converted_{os.path.basename(args.snapshot)}", "w") as f:
     # Metallicity (mass fraction)
     f.create_dataset("Z", data=np.array(tree.z, dtype=np.float64))
     f.create_dataset(
-        "rho", data=np.array(1e10 * Msun / kpc ** 3 * tree.rho, dtype=np.float64)
+        "rho", data=ds.arr(tree.rho, "1e10*Msun/kpc**3").to("g/cm**3"),
+        dtype=np.float64,
     )  # Density (g/cm^3)
     f["rho"].attrs["units"] = b"g/cm^3"
     # Neutral fraction n_HI / n_H

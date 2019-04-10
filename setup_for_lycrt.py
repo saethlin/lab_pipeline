@@ -95,7 +95,7 @@ with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
         #vel=velocity * np.sqrt(ascale),
         vel=velocity.to('km/s').d,
         #m=mass * hinv,
-        m=mass.to('Msun').d/1e10,
+        m=mass.to('1e10*Msun').d,
         h=smoothing_length.d,
         nh=neutral_fraction.d,
         ne=electron_fraction.d,
