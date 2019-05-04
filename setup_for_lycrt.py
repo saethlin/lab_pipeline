@@ -90,21 +90,16 @@ with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
 ) as paramfile, open(os.path.join(args.outdir, "octreefile"), "w") as octreefile:
 
     octree.build_octree_from_particle(
-        #pos=gas_position * ascale * hinv,
         pos=gas_position.to('kpc').d,
-        #vel=velocity * np.sqrt(ascale),
         vel=velocity.to('km/s').d,
-        #m=mass * hinv,
         m=mass.to('1e10*Msun').d,
-        h=smoothing_length.d,
+        h=smoothing_length.to('kpc').d,
         nh=neutral_fraction.d,
         ne=electron_fraction.d,
         u=internal_energy.d,
         z=gas_metallicity.d,
-        #cen=galaxy_pos.to('code_length') * ascale * hinv,
         cen=galaxy_pos.to('kpc').d,
         fname=octreefile.name.encode("utf-8"),
-        #MAX_DISTANCE_FROM0=SIZE.to('code_length') * ascale * hinv,
         MAX_DISTANCE_FROM0=SIZE.to('kpc').d,
         TREE_MAX_NPART=args.max_npart,
         TREE_MIN_SIZE=args.min_size.to('kpc').d,
