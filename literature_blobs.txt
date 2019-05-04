@@ -1,0 +1,22 @@
+Nilsson 2006
+z=3.16 1e43 ergs/s, diameter 60 kpc
+cutoff 3.7e-18
+
+Smith, D 2007
+z=2.83, 2.1e44 erg/s diameter 95 kpc (notes it's only the 6th at >50 kpc)
+cutoff not mentioned
+
+Prescott 2012
+no evidence for the kind of bubble-like structures that have been taken as evidence for the superwind outflow scenario (e.g.,Taniguchi et al.2001; Morietal.2004; Matsuda et al.2004)
+
+Ouchi 2009
+Giant LAE z=6.595 3.9e43 erg/s
+major axis 3 arcseconds
+
+Steidel 2011
+average Lya for 11 blobs 6.57e43 erg/s assuming z=2.65
+Provides parameters for SB profiles!
+Limiting magnitude 1e-19 erg/s/cm^2/arcsec^2
+
+Rosdahl 2012
+
