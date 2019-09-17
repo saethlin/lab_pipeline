@@ -2,36 +2,20 @@ import argparse
 import numpy as np
 import os
 import matplotlib
+matplotlib.rcParams['font.size'] = 20
 import h5py
 from matplotlib import pyplot as plt
 import matplotlib.patheffects
 
-os.environ["OMP_NUM_THREADS"] = "1"
 
 parser = argparse.ArgumentParser("COLT Plotter")
 parser.add_argument("colt_file")
 parser.add_argument("-o", "--output")
-parser.add_argument("--dpi", default=96, type=int)
 parser.add_argument("--uv", action="store_true", default=False)
 parser.add_argument("--muse", action="store_true", default=False)
 parser.add_argument("--error", action="store_true", default=False)
 parser.add_argument("--sb_image", default=0, type=int)
 args = parser.parse_args()
-
-matplotlib.rcParams.update(
-    {
-        "savefig.facecolor": "w",
-        "text.color": "k",
-        "axes.edgecolor": "k",
-        "axes.labelcolor": "k",
-        "xtick.color": "k",
-        "ytick.color": "k",
-        "font.family": "STIXGeneral",
-        "font.size": 22,
-        "mathtext.fontset": "cm",
-        "mathtext.fallback_to_cm": True,
-    }
-)
 
 if args.error:
     max_clip = 1.0
@@ -42,11 +26,6 @@ elif args.uv:
 else:
     max_clip = 5e-16
     min_clip = 1e-20
-
-bottom = 0.07
-top = 0.02
-left = 0.08
-right = 0.01
 
 
 with h5py.File(args.colt_file, "r") as f:
@@ -59,11 +38,12 @@ with h5py.File(args.colt_file, "r") as f:
     redshift = f.attrs["z"]
     lum = f.attrs["L_Lya"] * np.sum(f["esc/weight"])
     colt_pixel_size = np.sqrt(f["LOS"].attrs["SB_arcsec2"])
-    image_radius = (colt_pixel_size * image.shape[0])/2
+    image_radius = f["LOS"].attrs["SB_radius"] / (3.085_677_581_467_192e18 * 1e3)
 
 
-fig = plt.figure(figsize=(6.0, 5.0))
-ax = fig.add_axes([left, bottom, 1.0 - left - right, 1.0 - bottom - top])
+fig = plt.figure(figsize=(8.0, 8.0))
+ax = fig.gca()
+'''
 ax.text(
     0.5,
     0.99,
@@ -71,9 +51,14 @@ ax.text(
     horizontalalignment="center",
     verticalalignment="top",
     transform=ax.transAxes,
-    color="k",
-    path_effects=[matplotlib.patheffects.withStroke(linewidth=5, foreground="w")],
+    color="w",
+    path_effects=[
+        matplotlib.patheffects.withStroke(
+            linewidth=2, foreground=matplotlib.cm.viridis(0)
+        )
+    ],
 )
+'''
 
 
 if args.error:
@@ -83,10 +68,10 @@ if args.error:
         norm=matplotlib.colors.LogNorm(vmin=1e-2, vmax=1.0),
         extent=[-image_radius, image_radius, -image_radius, image_radius],
         resample=False,
-        interpolation="nearest",
+        interpolation="none",
     )
-    ax.set_xlabel("(arcsec)")
-    ax.set_ylabel("(arcsec)")
+    ax.set_xlabel("kpc")
+    ax.set_ylabel("kpc")
 else:
     if args.muse:
         from scipy.ndimage import zoom
@@ -100,11 +85,11 @@ else:
         image = gaussian_filter(image, sigma)
 
         # Bin to MUSE pixel scale
-        #muse_image = zoom(muse_image, colt_pixel_size / muse_pixel_size)
-        #print(muse_image.shape)
+        # muse_image = zoom(muse_image, colt_pixel_size / muse_pixel_size)
+        # print(muse_image.shape)
 
-        #print("colt", np.sum(image) * colt_pixel_size ** 2)
-        #print("muse", np.sum(muse_image) * muse_pixel_size ** 2)
+        # print("colt", np.sum(image) * colt_pixel_size ** 2)
+        # print("muse", np.sum(muse_image) * muse_pixel_size ** 2)
 
     plot_image = ax.imshow(
         image,
@@ -112,7 +97,7 @@ else:
         norm=matplotlib.colors.LogNorm(vmin=min_clip, vmax=max_clip),
         extent=[-image_radius, image_radius, -image_radius, image_radius],
         resample=False,
-        interpolation="nearest",
+        interpolation="none",
     )
 
     '''
@@ -125,23 +110,27 @@ else:
     ax.contour(y, x, image, levels=[1e-18], colors='w')
     '''
 
-    ax.set_xlabel("(arcsec)")
-    ax.set_ylabel("(arcsec)")
+    ax.set_xlabel("kpc")
+    ax.set_ylabel("kpc")
 
-cbar = fig.colorbar(plot_image, pad=0)
+l, b, w, h = ax.get_position().bounds
+cax = fig.add_axes([l + w, b, 0.04, h])
+cax.set_snap(True)
+cbar = fig.colorbar(plot_image, pad=0, cax=cax)
 cbar.ax.tick_params(axis="both", direction="in", which="both")
 
 if args.error:
     cbar.set_label("Relative Error")
 elif args.uv:
     cbar.set_label(
-        r"Lyman-Continuum Surface Brightness $\left(\frac{\mathrm{erg}}{\mathrm{s}\,\mathrm{cm}^2\,\mathrm{arcsec}^2}\right)$"
+        r"Lyman-Continuum Surface Brightness $\left(\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^{-2}\,\mathrm{arcsec}^{-2}\right)$"
     )
 else:
     cbar.set_label(
-        r"Ly$\alpha$ Surface Brightness $\left(\frac{\mathrm{erg}}{\mathrm{s}\,\mathrm{cm}^2\,\mathrm{arcsec}^2}\right)$"
+        r"$\Sigma_{\rm Ly \alpha} \left(\mathrm{erg}\,\mathrm{s}^{-1}\,\mathrm{cm}^{-2}\,\mathrm{arcsec}^{-2}\right)$"
     )
 
+'''
 ax.tick_params(
     axis="both",
     direction="in",
@@ -151,8 +140,8 @@ ax.tick_params(
     left=True,
     right=True,
 )
-ax.xaxis.set_minor_locator(matplotlib.ticker.MultipleLocator(10))
-ax.yaxis.set_minor_locator(matplotlib.ticker.MultipleLocator(10))
+'''
+ax.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(25))
+ax.yaxis.set_major_locator(matplotlib.ticker.MultipleLocator(25))
 
-fig.set_size_inches(12.80, 10.24)
-fig.savefig(args.output, dpi=args.dpi, bbox_inches="tight")
+fig.savefig(args.output, bbox_inches="tight")

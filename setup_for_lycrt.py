@@ -5,24 +5,32 @@ import caesar
 import octree
 import bpass
 import numpy as np
-
-# Tell Anaconda MKL to not launch a bajillion threads and slow us down
-os.environ["OMP_NUM_THREADS"] = "1"
+from scipy.interpolate import interp1d
+import agn_spectrum
 
 parser = argparse.ArgumentParser()
 parser.add_argument("snapshot")
-parser.add_argument("--caesar", help="Path to the snapshot's CAESAR file")
-parser.add_argument("--outdir", help="Directory to place output files", default=".")
-parser.add_argument(
-    "--n_iters", help="Number of lycrt iterations", type=int, default=20
-)
-parser.add_argument("--galaxy_index", help="CAESAR galaxy index", type=int, default=0)
-parser.add_argument(
-    "--cube_size", help="Side length of output cube (kpccm)", type=float, default=250.
-)
-parser.add_argument(
-    "--max_npart", help="Max number of particles in an octree cell", type=int, default=1
-)
+parser.add_argument("caesar", help="Path to the snapshot's CAESAR file")
+parser.add_argument("--outdir",
+                    help="Directory to place output files",
+                    default=".")
+parser.add_argument("--ignore_agn", action="store_true", default=False)
+parser.add_argument("--n_iters",
+                    help="Number of lycrt iterations",
+                    type=int,
+                    default=20)
+parser.add_argument("--galaxy_index",
+                    help="CAESAR galaxy index",
+                    type=int,
+                    default=0)
+parser.add_argument("--cube_size",
+                    help="Side length of output cube (kpc)",
+                    type=float,
+                    default=75.)
+parser.add_argument("--max_npart",
+                    help="Max number of particles in an octree cell",
+                    type=int,
+                    default=1)
 parser.add_argument(
     "--min_size",
     help="Minimum size of an octree cell (kpc)",
@@ -35,16 +43,37 @@ os.makedirs(args.outdir, exist_ok=True)
 
 ds = yt.load(args.snapshot)
 args.min_size = ds.quan(args.min_size, 'kpc')
-SIZE = ds.quan(args.cube_size, "kpccm")
+SIZE = ds.quan(args.cube_size, "kpc")
 
-from scipy.interpolate import interp1d
-fg_table = np.loadtxt('/ufrc/narayanan/kimockb/lycrt-example/model/fg_uvb_table.txt')
-j_uvb = interp1d(fg_table[:, 0], fg_table[:, 1]*1e-21)(ds.current_redshift)
+fg_table = np.loadtxt(
+    '/ufrc/narayanan/kimockb/lycrt-example/model/fg_uvb_table.txt')
+j_uvb = interp1d(fg_table[:, 0], fg_table[:, 1] * 1e-21)(ds.current_redshift)
 
 # Assume the galaxy of interest is the largest
-obj = caesar.load(args.caesar, load_limit=10)
+obj = caesar.quick_load(args.caesar)
 galaxy_pos = obj.galaxies[args.galaxy_index].pos
 region = ds.box(galaxy_pos - SIZE, galaxy_pos + SIZE)
+
+accretion_rate = region[('PartType5', 'BH_Mdot')]
+agn_pos = region[('PartType5', 'Coordinates')]
+
+agn_luminosity = []
+const = yt.physical_constants
+
+for i in range(len(accretion_rate)):
+    if accretion_rate[i] == 0:
+        agn_luminosity.append(0)
+        continue
+
+    total_luminosity = 0.1 * accretion_rate[i] * const.c**2
+    nu, lum = agn_spectrum.agn_spectrum(np.log10(total_luminosity.to('Lsun')))
+    nu = nu[:-4]
+    lum = lum[:-4]
+    lum_photons = ds.arr(10**lum,
+                         'erg/s') / (ds.arr(nu, 'Hz') * const.planck_constant)
+    lum_photons = lum_photons.convert_to_base('cgs').d
+    mask = nu < 15.5
+    agn_luminosity.append(np.trapz(lum_photons[mask], nu[mask]))
 
 # Data we need from the gas particles
 gas_position = region[("PartType0", "Coordinates")]
@@ -71,23 +100,52 @@ simtime = yt_cosmo.t_from_z(ds.current_redshift).in_units("Gyr")
 stellar_ages = (simtime - stellar_formation_age).in_units("Gyr")
 
 # TODO: Still unclear if my usage of this function is correct
-star_ionizing_luminosity = star_masses.to('Msun') * 10 ** bpass.compute_stellar_luminosity(
-    stellar_ages, star_metallicity, BAND_name="ionizing"
-)
+star_ionizing_luminosity = star_masses.to(
+    'Msun') * 10**bpass.compute_stellar_luminosity(
+        stellar_ages, star_metallicity, BAND_name="ionizing")
 
-L_UV_star = star_masses.to('Msun') * 10 ** bpass.compute_stellar_luminosity(
-    stellar_ages, star_metallicity, BAND_name="UV"
-)
-
-
+L_UV_star = star_masses.to('Msun') * 10**bpass.compute_stellar_luminosity(
+    stellar_ages, star_metallicity, BAND_name="UV")
 """
 Send the star and gas data to lycrt via files
 """
-#ascale = ds.scale_factor
-#hinv = 1/ds.hubble_constant
+# ascale = ds.scale_factor
+# hinv = 1/ds.hubble_constant
 with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
-    os.path.join(args.outdir, "paramfile"), "w"
-) as paramfile, open(os.path.join(args.outdir, "octreefile"), "w") as octreefile:
+        os.path.join(args.outdir, "paramfile"),
+        "w") as paramfile, open(os.path.join(args.outdir, "octreefile"),
+                                "w") as octreefile:
+
+    if not args.ignore_agn:
+        starfile.write("{}\n".format(star_positions.shape[0] +
+                                     len(agn_luminosity)))
+        for pos, lum in zip(agn_pos, agn_luminosity):
+            pos = (pos - galaxy_pos).to('kpc').d
+            starfile.write("{} {} {} {}\n".format(*pos, lum))
+    else:
+        starfile.write("{}\n".format(star_positions.shape[0]))
+
+    for (pos, lum) in zip(
+        (star_positions - galaxy_pos).convert_to_units('kpc').d,
+            star_ionizing_luminosity.d):
+        starfile.write("{} {} {} {}\n".format(pos[0], pos[1], pos[2], lum))
+    starfile.flush()
+
+    paramfile.write("""octree_file     {}
+star_file       {}
+n_iters         {}
+n_photons_star  1e7
+n_photons_uvb   1e7
+J_uvb           {}
+dust_kappa      1
+n_mu            1
+n_phi           1""".format(
+        octreefile.name,
+        starfile.name,
+        args.n_iters,
+        j_uvb,
+    ))
+    paramfile.flush()
 
     octree.build_octree_from_particle(
         pos=gas_position.to('kpc').d,
@@ -103,22 +161,4 @@ with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
         MAX_DISTANCE_FROM0=SIZE.to('kpc').d,
         TREE_MAX_NPART=args.max_npart,
         TREE_MIN_SIZE=args.min_size.to('kpc').d,
-    )
-
-    starfile.write("{}\n".format(star_metallicity.size))
-    for (pos, lum) in zip((star_positions - galaxy_pos).convert_to_units('kpc').d, star_ionizing_luminosity.d):
-        starfile.write("{} {} {} {}\n".format(pos[0], pos[1], pos[2], lum))
-
-    paramfile.write(
-        """octree_file     {}
-star_file       {}
-n_iters         {}
-n_photons_star  1e7
-n_photons_uvb   1e7
-J_uvb           {}
-dust_kappa      1
-n_mu            1
-n_phi           1""".format(
-            octreefile.name, starfile.name, args.n_iters, j_uvb,
-        )
     )
