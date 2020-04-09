@@ -6,7 +6,8 @@ import octree
 import bpass
 import numpy as np
 from scipy.interpolate import interp1d
-import agn_spectrum
+import powderday.agn_models
+import powderday.config
 
 parser = argparse.ArgumentParser()
 parser.add_argument("snapshot")
@@ -14,11 +15,13 @@ parser.add_argument("caesar", help="Path to the snapshot's CAESAR file")
 parser.add_argument("--outdir",
                     help="Directory to place output files",
                     default=".")
-parser.add_argument("--ignore_agn", action="store_true", default=False)
+parser.add_argument('--agn_model',
+                    choices=['none', 'hopkins', 'nenkova'],
+                    default='none')
 parser.add_argument("--n_iters",
                     help="Number of lycrt iterations",
                     type=int,
-                    default=20)
+                    default=50)
 parser.add_argument("--galaxy_index",
                     help="CAESAR galaxy index",
                     type=int,
@@ -37,8 +40,30 @@ parser.add_argument(
     type=float,
     default=0.01,
 )
-
+parser.add_argument(
+    '--temperature_multiplier',
+    type=float,
+    default=1.0,
+)
+parser.add_argument(
+    '--agn_multiplier',
+    type=float,
+    default=1.0,
+)
+parser.add_argument(
+    '--agn_luminosity',
+    choices=['eddington', 'magorrian'],
+    default='eddington',
+)
+parser.add_argument(
+    "--n_photons_star",
+    help="Number of star photons to simulate",
+    type=float,
+    default=1e7,
+)
 args = parser.parse_args()
+print(args)
+
 os.makedirs(args.outdir, exist_ok=True)
 
 ds = yt.load(args.snapshot)
@@ -54,32 +79,95 @@ obj = caesar.quick_load(args.caesar)
 galaxy_pos = obj.galaxies[args.galaxy_index].pos
 region = ds.box(galaxy_pos - SIZE, galaxy_pos + SIZE)
 
-accretion_rate = region[('PartType5', 'BH_Mdot')]
-agn_pos = region[('PartType5', 'Coordinates')]
 
-agn_luminosity = []
 const = yt.physical_constants
+if args.agn_luminosity == 'magorrian' and args.agn_model != 'none':
+    agn_pos = []
+    agn_luminosity = []
+    for gal in obj.galaxies:
+        if np.all(np.abs((gal.pos - galaxy_pos).to('kpc')) < SIZE):
 
-for i in range(len(accretion_rate)):
-    if accretion_rate[i] == 0:
-        agn_luminosity.append(0)
-        continue
+            agn_pos.append(gal.pos.copy().to('kpc'))
+            total_luminosity = 4 * np.pi * const.gravitational_constant * const.amu * const.c * gal.masses[
+                'stellar'] * 0.0006 / const.thompson_cross_section
 
-    total_luminosity = 0.1 * accretion_rate[i] * const.c**2
-    nu, lum = agn_spectrum.agn_spectrum(np.log10(total_luminosity.to('Lsun')))
-    nu = nu[:-4]
-    lum = lum[:-4]
-    lum_photons = ds.arr(10**lum,
-                         'erg/s') / (ds.arr(nu, 'Hz') * const.planck_constant)
-    lum_photons = lum_photons.convert_to_base('cgs').d
-    mask = nu < 15.5
-    agn_luminosity.append(np.trapz(lum_photons[mask], nu[mask]))
+            if args.agn_model == 'hopkins':
+                nu, lum = powderday.agn_models.hopkins.agn_spectrum(
+                    np.log10(total_luminosity.to('Lsun')))
+                nu = ds.arr(10**nu, 'Hz')
+                lum = ds.arr(10**lum, 'erg/s')
+
+            elif args.agn_model == 'nenkova':
+                powderday.config.par = type(powderday)('parameters')
+                powderday.config.par.BH_modelfile = "/ufrc/narayanan/kimockb/clumpy_models_201410_tvavg.hdf5"
+                nu, lum = powderday.agn_models.nenkova.Nenkova2008(
+                ).agn_spectrum(np.log10(total_luminosity.to('Lsun')))
+                nu = ds.arr(10**nu, 'Hz')
+                lum = ds.arr(10**lum, 'erg/s')
+
+            nu = nu[:-4]
+            lum = lum[:-4]
+            idx = np.argsort(nu)
+            nu = nu[idx]
+            lum = lum[idx]
+
+            lum_photons = lum / (nu * const.planck_constant)
+            mask = (nu >
+                    (yt.YTQuantity(13.6, 'eV') / const.planck_constant)) & (
+                        nu < yt.YTQuantity(24.4, 'eV') / const.planck_constant)
+            agn_luminosity.append(np.trapz(lum_photons[mask], nu[mask]).d)
+
+    agn_luminosity = np.array(agn_luminosity)
+    agn_luminosity *= args.agn_multiplier
+elif args.agn_luminosity == 'eddington' and args.agn_model != 'none':
+    agn_pos = region[('PartType5', 'Coordinates')].to('kpc')
+    agn_mass = region[('PartType5', 'BH_Mass')].to('Msun')
+
+    agn_luminosity = []
+
+    for i in range(len(agn_mass)):
+        if agn_mass[i] == 0.0:
+            agn_luminosity.append(0.0)
+            continue
+
+        total_luminosity = 4 * np.pi * const.gravitational_constant * const.amu * const.c * agn_mass[
+            i] / const.thompson_cross_section
+
+        if args.agn_model == 'hopkins':
+            nu, lum = powderday.agn_models.hopkins.agn_spectrum(
+                np.log10(total_luminosity.to('Lsun')))
+            nu = ds.arr(10**nu, 'Hz')
+            lum = ds.arr(10**lum, 'erg/s')
+
+        elif args.agn_model == 'nenkova':
+            powderday.config.par = type(powderday)('parameters')
+            powderday.config.par.BH_modelfile = "/ufrc/narayanan/kimockb/clumpy_models_201410_tvavg.hdf5"
+            nu, lum = powderday.agn_models.nenkova.Nenkova2008(
+            ).agn_spectrum(np.log10(total_luminosity.to('Lsun')))
+            nu = ds.arr(10**nu, 'Hz')
+            lum = ds.arr(10**lum, 'erg/s')
+
+        nu = nu[:-4]
+        lum = lum[:-4]
+        idx = np.argsort(nu)
+        nu = nu[idx]
+        lum = lum[idx]
+
+        lum_photons = lum / (nu * const.planck_constant)
+        mask = (nu >
+                (yt.YTQuantity(13.6, 'eV') / const.planck_constant)) & (
+                    nu < yt.YTQuantity(24.4, 'eV') / const.planck_constant)
+        agn_luminosity.append(np.trapz(lum_photons[mask], nu[mask]).d)
+
+    agn_luminosity = np.array(agn_luminosity)
+    agn_luminosity *= args.agn_multiplier
 
 # Data we need from the gas particles
 gas_position = region[("PartType0", "Coordinates")]
-velocity = region[("PartType0", "Velocities")] - obj.galaxies[0].vel
+velocity = region[("PartType0", "Velocities")] - obj.halos[0].vel
 mass = region[("PartType0", "Masses")]
-internal_energy = region[("PartType0", "InternalEnergy")]
+internal_energy = region[("PartType0",
+                          "InternalEnergy")] * args.temperature_multiplier
 neutral_fraction = region[("PartType0", "NeutralHydrogenAbundance")]
 electron_fraction = region[("PartType0", "ElectronAbundance")]
 smoothing_length = region[("PartType0", "SmoothingLength")]
@@ -116,18 +204,17 @@ with open(os.path.join(args.outdir, "starfile"), "w") as starfile, open(
         "w") as paramfile, open(os.path.join(args.outdir, "octreefile"),
                                 "w") as octreefile:
 
-    if not args.ignore_agn:
+    if args.agn_model != 'none':
         starfile.write("{}\n".format(star_positions.shape[0] +
                                      len(agn_luminosity)))
         for pos, lum in zip(agn_pos, agn_luminosity):
-            pos = (pos - galaxy_pos).to('kpc').d
-            starfile.write("{} {} {} {}\n".format(*pos, lum))
+            centered_pos = (pos - galaxy_pos).to('kpc').d
+            starfile.write("{} {} {} {}\n".format(*centered_pos, lum))
     else:
         starfile.write("{}\n".format(star_positions.shape[0]))
 
-    for (pos, lum) in zip(
-        (star_positions - galaxy_pos).convert_to_units('kpc').d,
-            star_ionizing_luminosity.d):
+    for (pos, lum) in zip((star_positions - galaxy_pos).to('kpc').d,
+                          star_ionizing_luminosity.d):
         starfile.write("{} {} {} {}\n".format(pos[0], pos[1], pos[2], lum))
     starfile.flush()
 

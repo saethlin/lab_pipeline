@@ -43,33 +43,54 @@ Msun = 1.988_435e33  # Solar mass in g
 with h5py.File(f"converted_{os.path.basename(args.snapshot)}", "w") as f:
     f.attrs["redshift"] = np.float64(ds.current_redshift)
     f.attrs["n_cells"] = np.int32(tree.TOTAL_NUMBER_OF_CELLS)
-    f.create_dataset("parent", data=np.array(tree.parent_ID, dtype=np.int32))
-    f.create_dataset("child_check", data=np.array(tree.sub_cell_check, dtype=np.int32))
-    f.create_dataset("child", data=np.array(tree.sub_cell_IDs, dtype=np.int32))
-    f.create_dataset("T", data=np.array(tree.T, dtype=np.float64))  # Temperature (K)
+    f.create_dataset("parent",
+                     data=np.array(tree.parent_ID, dtype=np.int32),
+                     compression=1)
+    f.create_dataset("child_check",
+                     data=np.array(tree.sub_cell_check, dtype=np.int32),
+                     compression=1)
+    f.create_dataset("child",
+                     data=np.array(tree.sub_cell_IDs, dtype=np.int32),
+                     compression=1)
+    f.create_dataset("T",
+                     data=np.array(tree.T, dtype=np.float64),
+                     compression=1)  # Temperature (K)
     f["T"].attrs["units"] = b"K"
     # Metallicity (mass fraction)
-    f.create_dataset("Z", data=np.array(tree.z, dtype=np.float64))
+    f.create_dataset("Z",
+                     data=np.array(tree.z, dtype=np.float64),
+                     compression=1)
     f.create_dataset(
-        "rho", data=ds.arr(tree.rho, "1e10*Msun/kpc**3").to("g/cm**3"),
+        "rho",
+        data=ds.arr(tree.rho, "1e10*Msun/kpc**3").to("g/cm**3"),
         dtype=np.float64,
+        compression=1,
     )  # Density (g/cm^3)
     f["rho"].attrs["units"] = b"g/cm^3"
     # Neutral fraction n_HI / n_H
-    f.create_dataset("x_HI", data=np.array(x_HI, dtype=np.float64))
+    f.create_dataset("x_HI",
+                     data=np.array(x_HI, dtype=np.float64),
+                     compression=1)
     # Ionizing intensity in weird units
-    f.create_dataset("Jion", data=np.array(Jion, dtype=np.float64))
+    f.create_dataset("Jion",
+                     data=np.array(Jion, dtype=np.float64),
+                     compression=1)
 
-    f.create_dataset(
-        "r", data=ds.arr(tree.min_x, "kpc").to("cm").d, dtype=np.float64
-    )  # Minimum corner positions (cm)
+    f.create_dataset("r",
+                     data=ds.arr(tree.min_x, "kpc").to("cm").d,
+                     dtype=np.float64,
+                     compression=1)  # Minimum corner positions (cm)
     f["r"].attrs["units"] = b"cm"
-    f.create_dataset(
-        "w", data=ds.arr(tree.width, "kpc").to("cm").d, dtype=np.float64
-    )  # Cell widths (cm)
+    f.create_dataset("w",
+                     data=ds.arr(tree.width, "kpc").to("cm").d,
+                     dtype=np.float64,
+                     compression=1)  # Cell widths (cm)
     f["w"].attrs["units"] = b"cm"
     f.create_dataset(
-        "v", data=ds.arr(tree.vel, "km/s").to("cm/s"), dtype=np.float64
+        "v",
+        data=ds.arr(tree.vel, "km/s").to("cm/s"),
+        dtype=np.float64,
+        compression=1,
     )  # Cell velocities (cm/s)
     f["v"].attrs["units"] = b"cm/s"
 
@@ -77,9 +98,12 @@ with h5py.File(f"converted_{os.path.basename(args.snapshot)}", "w") as f:
 
     # Star positions and luminosities for UV continuum mode
     f.create_dataset(
-        "r_star", data=ds.arr(star_positions, "kpc").to("cm").d, dtype=np.float64
+        "r_star",
+        data=ds.arr(star_positions, "kpc").to("cm").d,
+        dtype=np.float64,
+        compression=1,
     )
     f["r_star"].attrs["units"] = b"cm"
 
-    f.create_dataset("L_UV", data=L_UV_star)
+    f.create_dataset("L_UV", data=L_UV_star, compression=1)
     f["L_UV"].attrs["units"] = b"erg/s/angstrom"
